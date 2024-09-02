@@ -1,0 +1,10 @@
+name: transformers
+channels:
+  - defaults
+  - conda-forge
+dependencies:
+  - python=3.9
+  - jupyterlab
+  - pip
+  - pip:
+      - tensorflow~=2.14.0
