@@ -3,11 +3,11 @@ channels:
   - defaults
   - conda-forge
 dependencies:
-  - python=3.9
+  - python=3.12
   - jupyterlab
   - numpy
   - matplotlib
   - pip
   - pip:
-      - tensorflow~=2.14.0
+      - tensorflow
       - tensorflow_datasets
