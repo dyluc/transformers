@@ -2,10 +2,10 @@
 
 Notes:
 - `prep_sets.py` just runs some preprocessing on the JSON files for easier access to image filenames and labels.
-- There is class imbalance in the dataset, distribution of images per category follows the observation frequency of that category. Consider techniques (oversampling, smote, etc) to manage classes with few examples following analysis of confusion matrix.
+- There is class imbalance in the dataset, distribution of images per category follows the observation frequency of that category. We can consider techniques (oversampling, smote, etc) to manage classes with few examples following analysis of the confusion matrix.
 - On the resizing strategy, padding minimizes subject loss and maintains aspect ratio. Distortion via resizing or potentially cropping out important features is more risky for ViTs than padding. Attention mechanisms can learn to ignore padding regions (even without configuring any attention masks). We can inspect our attention maps to ensure these areas receive low attention scores. Hopefully the ViT can use the positional embeddings (and an understanding of the spatial arrangement of the patches) to differentiate padded regions from patches with actual content. All non square images will have padded regions.
 
-Plan for data preprocessing (repeat the following for both training and validation sets):
+## Data Preprocessing
 - Load and process JSON files into just filename and category ids, then shuffle on disk.
 - Load processed JSON files and batch the annotations, attaching the labels. For each annotation batch, construct a dataset, load the images, resize and normalize them, and finally shuffle the batch.
 - Serialize batch of images to single TFRecord file, repeat for all batches in the given set.
@@ -13,9 +13,11 @@ Plan for data preprocessing (repeat the following for both training and validati
 
 Then the processed datasets can be uploaded to S3 for training in SaturnCloud. Data augmentation can be applied above too, different strategies can be used for cropping (even using bounding boxes where present), though padding seems most sensible and straightforward given the model architecture.
 
-Plan for data ingestion pipeline:
+## Data Ingestion
 
-- Create data ingestion pipeline, to read in and train from TFRecord files (for specific load size + parallel reading and prefetching), pause training, reload next chunk from S3, repeat (don't want to load all data onto disk in SaturnCloud). In pipeline include interleaving (see book), shuffling, batching and prefetching configurations.
+- Enabling parallel reading and prefetching. Tensorflow datasets can be created from Python generators. A dedicated generator can manage downloading groups of our preprocessed TFRecord batch files, and deleting them once used.
+- The pipeline will include interleaving, further shuffling, batching and prefetching configurations.
+- This is a flexible approach for environments with constrained disk space, such as a SaturnCloud server.
 
 ## Dataset Corrupt JPEGs
 
