@@ -1,3 +1,6 @@
 checkpoints/** filter=lfs diff=lfs merge=lfs -text
 checkpoints/**/* filter=lfs diff=lfs merge=lfs -text
 *.weights.h5 filter=lfs diff=lfs merge=lfs -text
+dataset-utils/train_val2017/*.json filter=lfs diff=lfs merge=lfs -text
+*.jpg filter=lfs diff=lfs merge=lfs -text
+*.tfrecord filter=lfs diff=lfs merge=lfs -text
