@@ -1,3 +1,5 @@
 numpy
 matplotlib
 tensorflow_datasets
+boto3
+sagemaker

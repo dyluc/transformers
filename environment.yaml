@@ -11,3 +11,5 @@ dependencies:
   - pip:
       - tensorflow
       - tensorflow_datasets
+      - boto3
+      - sagemaker
