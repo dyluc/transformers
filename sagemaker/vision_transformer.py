@@ -55,7 +55,7 @@ class PositionalEmbedding(tf.keras.layers.Layer):
 class EncoderLayer(tf.keras.layers.Layer):
     def __init__(self, num_heads, embedding_dim, mlp_dim, dropout_rate=0.1, **kwargs):
         super().__init__(**kwargs)
-        self.attn_layer = tf.keras.layers.MultiHeadAttention( # key_dim = 768 / 12 = 64
+        self.attn_layer = tf.keras.layers.MultiHeadAttention( # key_dim = 256 / 4 = 64
             num_heads=num_heads, key_dim=embedding_dim // num_heads, dropout=dropout_rate
         )
         self.norm1 = tf.keras.layers.LayerNormalization()
@@ -67,29 +67,30 @@ class EncoderLayer(tf.keras.layers.Layer):
         ])
         self.dropout = tf.keras.layers.Dropout(dropout_rate)
 
-    def call(self, inputs, training=False):
+    def call(self, inputs):
         # mutli-head attention sublayer
         x = self.norm1(inputs)
-        x = self.attn_layer(x, value=x, training=training)
-        x = self.dropout(x, training=training)
+        x = self.attn_layer(x, value=x)
+        x = self.dropout(x)
         x = tf.keras.layers.Add()([x, inputs])
         
         # mlp sublayer
         x1 = self.norm2(x)
-        x1 = self.mlp(x1, training=training)
-        x1 = self.dropout(x1, training=training)
+        x1 = self.mlp(x1)
+        x1 = self.dropout(x1)
         x1 = tf.keras.layers.Add()([x1, x])
 
         return x1
 
 
 class ClassificationHead(tf.keras.layers.Layer):
-    def __init__(self, num_classes, mlp_dim=None, **kwargs):
+    def __init__(self, num_classes, mlp_dim, dropout_rate, **kwargs):
         super().__init__(**kwargs)
         output_layer = tf.keras.layers.Dense(num_classes, activation="softmax")
         if mlp_dim:
             self.mlp = tf.keras.Sequential([ # can add dropout here if overfitting during training
                 tf.keras.layers.Dense(mlp_dim, activation="gelu"),
+                tf.keras.layers.Dropout(dropout_rate),
                 output_layer
             ])
         else:
@@ -109,6 +110,7 @@ class ViT(tf.keras.Model):
         num_heads, 
         num_layers, 
         mlp_dim, 
+        clf_mlp_dim,
         dropout_rate,
         **kwargs
     ):
@@ -124,7 +126,7 @@ class ViT(tf.keras.Model):
             for _ in range(num_layers)
         ]
         self.class_token_norm = tf.keras.layers.LayerNormalization()
-        self.classification_head = ClassificationHead(num_classes, 2048)
+        self.classification_head = ClassificationHead(num_classes, clf_mlp_dim, dropout_rate)
 
 
     def call(self, inputs):
