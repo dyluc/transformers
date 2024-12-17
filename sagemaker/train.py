@@ -29,6 +29,15 @@ def main(args):
     batch_size = args.batch_size
     epochs = args.epochs
     base_learning_rate = args.base_learning_rate
+    # train_records_dir = "/opt/ml/input/data/train"
+    # valid_records_dir = "/opt/ml/input/data/valid"
+    # checkpoints_dir = "/opt/ml/checkpoints"
+    # tensorboard_log_dir = "/opt/ml/output/tensorboard"
+    
+    train_records_dir = "~/Desktop/train_val_images-processed(Aves)/train2017"
+    valid_records_dir = "~/Desktop/train_val_images-processed(Aves)/val2017"
+    checkpoints_dir = "./checkpoints"
+    tensorboard_log_dir = "./tensorboard"
     
     dataset_buffer_size = 8 * 1024 * 1024
     train_set_size = 214295
@@ -36,19 +45,18 @@ def main(args):
     shuffle_buffer_size = 10000
     lr_include_warmup = True
     lr_weight_decay = 1e-2
-    
     steps_per_epoch = math.ceil(train_set_size / batch_size) # math#ceil for partial batches
     total_steps = steps_per_epoch * epochs
     
     # load datasets
     train_set = tf.data.TFRecordDataset(
-        tf.io.gfile.glob("/opt/ml/input/data/train/*.tfrecord"), 
+        tf.io.gfile.glob(f"{train_records_dir}/*.tfrecord"), 
         compression_type="GZIP",
         buffer_size=dataset_buffer_size
     )
     
     valid_set = tf.data.TFRecordDataset(
-        tf.io.gfile.glob("/opt/ml/input/data/valid/*.tfrecord"), 
+        tf.io.gfile.glob(f"{valid_records_dir}/*.tfrecord"), 
         compression_type="GZIP",
         buffer_size=dataset_buffer_size
     )
@@ -71,7 +79,7 @@ def main(args):
 
     # prep callbacks
     checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
-        "/opt/ml/checkpoints/vit_inat17_sagemaker/vit_inat17_epoch-{epoch:02d}.weights.h5",
+        f"{checkpoints_dir}/vit_inat17_sagemaker/vit_inat17_epoch-{epoch:02d}.weights.h5",
         save_weights_only=True,
         save_best_only=True,
         monitor="val_loss",
@@ -85,7 +93,7 @@ def main(args):
     )
 
     tensorboard_callback=tf.keras.callbacks.TensorBoard(
-        log_dir="/opt/ml/output/tensorboard", 
+        log_dir=tensorboard_log_dir, 
         histogram_freq=1
     )
 
