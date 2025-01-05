@@ -1,0 +1,9 @@
+jupyterlab
+numpy
+scipy
+matplotlib
+tensorflow
+tensorflow_datasets
+boto3
+sagemaker
+scikit-learn

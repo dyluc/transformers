@@ -26,9 +26,9 @@ Then the processed datasets can be uploaded to S3 for training in SaturnCloud. D
 > working with large datasets that cannot be stored entirely on disk. See `ingestion-pipeline.ipynb` for an
 > implementation. S3 incurs data transfer costs so be careful how much data you transfer. 
 
-## Dataset Corrupt JPEGs
+## Dataset Corrupt JPEGs and Anomalous Files
 
-I found during dataset preperation that there are a few corrupt files across the validation and training sets. Since there were so few, I located the relevant observations on https://www.inaturalist.org/ and replaced them in the set (using the category and rights holder information attached to the annotations).
+During dataset preperation, I found a few corrupt files across the validation and training sets. Since there were so few, I located the relevant observations on https://www.inaturalist.org/ and replaced them in the set (using the category and rights holder information attached to the annotations).
 
 Validation (Under annotation batches 66 and 87):
 - `train_val_images/Plantae/Yucca schidigera/e86b5b9e546b87b003f433ae6c09e15d.jpg`
@@ -37,3 +37,7 @@ Validation (Under annotation batches 66 and 87):
 Training (Under annotation batch 22):
 
 - `train_val_images/Plantae/Eschscholzia californica/006fa2e4d3c83014333f7203a84fff8c.jpg`
+
+The following files are inconsistent with other class examples, so have been swapped out manually with more appropriate images:
+
+- `train_val_images/Aves/Geothlypis tolmiei/c1ffdd1f13d5664266d38f4397c81dcd.jpg` (waveform and spectogram)

@@ -1,8 +1,11 @@
 import tensorflow as tf
 import argparse
 import os
+import math
+from sklearn.utils.class_weight import compute_class_weight
 
 from vision_transformer import ViT
+from lr_schedule import WarmupLinearDecay10
 
 feature_description = {
     "image": tf.io.FixedLenFeature([], tf.string),
@@ -12,63 +15,97 @@ feature_description = {
 def normalize_image(image):
     return tf.cast(image, tf.float32) / 127.5 - 1.0 # normalize to [-1, 1]
 
-def parse_example_safely(serialized_example):
-    try:
-        parsed_example = tf.io.parse_single_example(serialized_example, feature_description)
+def parse_example(serialized_example):
+    parsed_example = tf.io.parse_single_example(serialized_example, feature_description)
+
+    # decode and normalize image, and extract label
+    image = tf.image.decode_jpeg(parsed_example["image"], channels=3)
+    image = normalize_image(image)
+    label = parsed_example["label"]
     
-        # decode and normalize image, and extract label
-        image = tf.image.decode_jpeg(parsed_example["image"], channels=3)
-        image = normalize_image(image)
-        label = parsed_example["label"]
-        
-        return image, label
-    except tf.errors.InvalidArgumentError as e:
-        tf.print(f"Error parsing example: {e}")
-        return None, None
-            
+    return image, label
+
+# weighted loss for class imbalance
+def calculate_class_weights(train_set_size, train_set, num_classes):
+    labels = []
+    for _, label in train_set.unbatch():
+        labels.append(label.numpy())
+    labels = tf.convert_to_tensor(labels, dtype=tf.int64)
+    class_labels = tf.range(num_classes)
+    class_weights = compute_class_weight(
+        class_weight="balanced",
+        classes=class_labels.numpy(),
+        y=labels.numpy()
+    )
+    return tf.constant(class_weights, dtype=tf.float32)
+# ===
+    
 def main(args):
-    # load datasets
+    # config
+    batch_size = args.batch_size
+    epochs = args.epochs
+    base_learning_rate = args.base_learning_rate
+    train_records_dir = "/opt/ml/input/data/train"
+    valid_records_dir = "/opt/ml/input/data/valid"
+    checkpoints_dir = "/opt/ml/checkpoints"
+    tensorboard_log_dir = "/opt/ml/output/tensorboard"
+    
+    # train_records_dir = "/Volumes/T7/train_val_images-processed(Aves)/train2017"
+    # valid_records_dir = "/Volumes/T7/train_val_images-processed(Aves)/val2017"
+    # checkpoints_dir = "./checkpoints"
+    # tensorboard_log_dir = "./tensorboard"
+    
     dataset_buffer_size = 8 * 1024 * 1024
+    train_set_size = 214295
+    valid_set_size = 21226
+    num_classes = 964
+    shuffle_buffer_size = 10000
+    lr_include_warmup = True
+    lr_weight_decay = 1e-2
+    steps_per_epoch = math.ceil(train_set_size / batch_size) # math#ceil for partial batches
+    total_steps = steps_per_epoch * epochs
+    
+    # load datasets
     train_set = tf.data.TFRecordDataset(
-        tf.io.gfile.glob("/opt/ml/input/data/train/*.tfrecord"), 
+        tf.io.gfile.glob(f"{train_records_dir}/*.tfrecord"), 
         compression_type="GZIP",
         buffer_size=dataset_buffer_size
     )
     
     valid_set = tf.data.TFRecordDataset(
-        tf.io.gfile.glob("/opt/ml/input/data/valid/*.tfrecord"), 
+        tf.io.gfile.glob(f"{valid_records_dir}/*.tfrecord"), 
         compression_type="GZIP",
         buffer_size=dataset_buffer_size
     )
 
     # map, shuffle, batch and prefetch
-    batch_size = args.batch_size
-    buffer_size = 10000
     train_set = (
         train_set
-        .map(parse_example_safely, num_parallel_calls=tf.data.AUTOTUNE)
-        .filter(lambda image, label: image is not None and label is not None)
-        .shuffle(buffer_size)
+        .map(parse_example, num_parallel_calls=tf.data.AUTOTUNE)
+        .shuffle(shuffle_buffer_size)
         .batch(batch_size)
         .prefetch(tf.data.AUTOTUNE)
     )
     
     valid_set = (
         valid_set
-        .map(parse_example_safely, num_parallel_calls=tf.data.AUTOTUNE)
-        .filter(lambda image, label: image is not None and label is not None)
+        .map(parse_example, num_parallel_calls=tf.data.AUTOTUNE)
         .batch(batch_size)
         .prefetch(tf.data.AUTOTUNE)
     )
+
+    # add class weights
+    class_weights = calculate_class_weights(train_set_size, train_set, num_classes)
     
-    # 20% train: 115836 val: 19197
-    train_set = train_set.take(115836)
-    valid_set = valid_set.take(19197)
-    #
+    def map_sample_weight(image, label):
+        sample_weight = tf.gather(class_weights, label)
+        return image, label, sample_weight
+
+    train_set = train_set.map(map_sample_weight, num_parallel_calls=tf.data.AUTOTUNE)
 
     # prep callbacks
     checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
-        "/opt/ml/checkpoints/vit_inat17_sagemaker/vit_inat17_epoch-{epoch:02d}.weights.h5",
+        checkpoints_dir + "/vit_inat17_sagemaker/vit_inat17_epoch-{epoch:02d}.weights.h5",
         save_weights_only=True,
         save_best_only=True,
         monitor="val_loss",
@@ -77,35 +114,50 @@ def main(args):
     )
     
     early_stopping_callback = tf.keras.callbacks.EarlyStopping(
-        patience=5,
+        monitor="val_loss",
+        patience=3,
         restore_best_weights=True,
     )
-    
-    train_set_size = 115836
-    epochs = args.epochs
-    linear_lr_decay = tf.keras.optimizers.schedules.PolynomialDecay(
-        initial_learning_rate=args.base_learning_rate,
-        decay_steps=(train_set_size // batch_size) * epochs, # base LR * (1 - t / T)
-        end_learning_rate=0.0,
+
+    tensorboard_callback=tf.keras.callbacks.TensorBoard(
+        log_dir=tensorboard_log_dir, 
+        histogram_freq=1
     )
+
+    # learning rate scheduler (linear lr decay)
+    if lr_include_warmup:
+        lr_schedule = WarmupLinearDecay10(
+            total_steps=total_steps,
+            base_lr=base_learning_rate
+        )
+    else:
+        lr_schedule = tf.keras.optimizers.schedules.PolynomialDecay(
+            initial_learning_rate=base_learning_rate,
+            decay_steps=total_steps,
+            end_learning_rate=0.0,
+            power=1.0,
+            cycle=False
+        )
 
     # create ViT
     vit_pretraining_model = ViT(
         input_shape=(224, 224, 3),
         patch_size=16,
-        num_classes=5089,
+        num_classes=num_classes,
         embedding_dim=256,
-        num_heads=4,
+        num_heads=4, # multi head attention key dim 256 / 4 = 64
         num_layers=4,
-        mlp_dim=1024,
-        dropout_rate=0.1,
+        mlp_dim=512,
+        clf_mlp_dim=256,
+        dropout_rate=0.15,
+        lr_weight_decay=lr_weight_decay # use same value as with AdamW
     )
     
     # compile
     vit_pretraining_model.compile(
         optimizer=tf.keras.optimizers.AdamW( # with weight decay (like l2 regularization)
-            learning_rate=linear_lr_decay, # we can reduce base lr or weight decay if unstable during training
-            weight_decay=0.1
+            learning_rate=lr_schedule, # linear decay with warmup
+            weight_decay=lr_weight_decay
         ),
         loss=tf.keras.losses.SparseCategoricalCrossentropy(),
         metrics=['accuracy']
@@ -116,7 +168,8 @@ def main(args):
         train_set,
         validation_data=valid_set,
         epochs=epochs,
-        callbacks=[checkpoint_callback],
+        steps_per_epoch=steps_per_epoch,
+        callbacks=[checkpoint_callback, tensorboard_callback],
         verbose=1
     )
 
@@ -124,6 +177,9 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
+    # model directory
+    parser.add_argument('--model_dir', type=str)
+    
     # hyperparameters
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--epochs", type=int, default=8)
